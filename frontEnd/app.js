@@ -1,60 +1,9 @@
-// --- Initial State & Mock Data (6 Diverse Community Requests) ---
-let requests = JSON.parse(localStorage.getItem('madad_requests')) || [
-    {
-        id: 1,
-        title: 'Urgent O+ Blood Donor Needed for Patient',
-        category: 'Blood Donation',
-        location: 'Liaquat University Hospital, Hyderabad',
-        author: 'Ali Raza (0300-9876543)',
-        description: 'Need 2 units of O+ blood urgently for a surgery scheduled this evening. Please reach out if available.',
-        status: 'Open'
-    },
-    {
-        id: 2,
-        title: 'Help Carrying Heavy Groceries for Elderly Neighbor',
-        category: 'Elderly Support',
-        location: 'Qasimabad, Block C',
-        author: 'Sana Memon (0312-5554321)',
-        description: 'My grandmother needs assistance carrying monthly grocery bags from the car up to her 3rd-floor apartment.',
-        status: 'Accepted'
-    },
-    {
-        id: 3,
-        title: 'Basic Mathematics Tutoring for 8th Grade Student',
-        category: 'Education / Tutoring',
-        location: 'Latifabad Unit 7',
-        author: 'Farhan Ahmed (0333-1122334)',
-        description: 'Looking for a volunteer student or teacher who can spend 2 hours on weekends helping with algebra basics.',
-        status: 'Open'
-    },
-    {
-        id: 4,
-        title: 'Car Battery Jump-Start Needed',
-        category: 'Other',
-        location: 'Sindh University Campus Gate',
-        author: 'Hamza Khan (0301-7788990)',
-        description: 'Car battery went flat near the main entrance gate. Looking for anyone with jumper cables nearby.',
-        status: 'Open'
-    },
-    {
-        id: 5,
-        title: 'Wheelchair Escort Assistance to Clinic',
-        category: 'Elderly Support',
-        location: 'Saddar, Hyderabad',
-        author: 'Zainab Bibi (0345-4433221)',
-        description: 'Need a volunteer to help guide and accompany an elderly relative using a wheelchair for a 30-minute doctor appointment.',
-        status: 'Completed'
-    },
-    {
-        id: 6,
-        title: 'Volunteers Needed to Search for Lost Persian Cat',
-        category: 'Other',
-        location: 'Autobahn Road, Latifabad',
-        author: 'Ayesha Shah (0321-9988776)',
-        description: 'White Persian cat went missing near Autobahn Road. Looking for 2-3 volunteers to help search nearby streets.',
-        status: 'Open'
-    }
-];
+
+// --- Backend API Configuration ---
+const API_URL = 'https://KhadijaNizamani.pythonanywhere.com/api';
+
+// --- Global State ---
+let requests = [];
 
 // --- DOM Elements ---
 const requestsContainer = document.getElementById('requestsContainer');
@@ -69,13 +18,23 @@ const statCompleted = document.getElementById('statCompleted');
 
 const requestForm = document.getElementById('requestForm');
 
-// --- Save to LocalStorage ---
-function saveRequests() {
-    localStorage.setItem('madad_requests', JSON.stringify(requests));
+// --- Fetch Requests from Live PythonAnywhere Backend ---
+async function fetchRequests() {
+    try {
+        const response = await fetch(`${API_URL}/requests`);
+        if (!response.ok) throw new Error('API server down');
+        requests = await response.json();
+        renderRequests();
+    } catch (error) {
+        console.warn('Backend API connection failed, falling back to LocalStorage:', error);
+        requests = JSON.parse(localStorage.getItem('madad_requests')) || [];
+        renderRequests();
+    }
 }
 
 // --- Render Stats ---
 function updateStats() {
+    if (!statTotal) return;
     statTotal.textContent = requests.length;
     statOpen.textContent = requests.filter(r => r.status === 'Open').length;
     statAccepted.textContent = requests.filter(r => r.status === 'Accepted').length;
@@ -84,9 +43,9 @@ function updateStats() {
 
 // --- Render Request Cards ---
 function renderRequests() {
-    const searchVal = searchInput.value.toLowerCase();
-    const catVal = categoryFilter.value;
-    const statusVal = statusFilter.value;
+    const searchVal = searchInput ? searchInput.value.toLowerCase() : '';
+    const catVal = categoryFilter ? categoryFilter.value : 'all';
+    const statusVal = statusFilter ? statusFilter.value : 'all';
 
     const filtered = requests.filter(req => {
         const matchesSearch = req.title.toLowerCase().includes(searchVal) || 
@@ -124,7 +83,7 @@ function renderRequests() {
                     </div>
                     
                     <div class="card-category">
-                        <i class="fa-solid fa-tag"></i> ${req.category}
+                        <i class="fa-solid fa-tag"></i> ${escapeHTML(req.category)}
                     </div>
 
                     <p class="card-desc">${escapeHTML(req.description)}</p>
@@ -159,54 +118,93 @@ function renderRequests() {
     }).join('');
 }
 
-// --- Action Handlers ---
-function updateStatus(id, newStatus) {
+// --- Action Handlers (Live Backend + Local Fallback) ---
+async function updateStatus(id, newStatus) {
+    try {
+        await fetch(`${API_URL}/requests/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+    } catch (e) {
+        console.error('API update status failed:', e);
+    }
+    
     requests = requests.map(req => req.id === id ? { ...req, status: newStatus } : req);
-    saveRequests();
+    localStorage.setItem('madad_requests', JSON.stringify(requests));
     renderRequests();
 }
 
-function deleteRequest(id) {
+async function deleteRequest(id) {
     if (confirm('Are you sure you want to delete this request?')) {
+        try {
+            await fetch(`${API_URL}/requests/${id}`, {
+                method: 'DELETE'
+            });
+        } catch (e) {
+            console.error('API delete request failed:', e);
+        }
+        
         requests = requests.filter(req => req.id !== id);
-        saveRequests();
+        localStorage.setItem('madad_requests', JSON.stringify(requests));
         renderRequests();
     }
 }
 
 // --- Form Submission Handling ---
-requestForm.addEventListener('submit', (e) => {
-    e.preventDefault();
+if (requestForm) {
+    requestForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
 
-    const newReq = {
-        id: Date.now(),
-        title: document.getElementById('reqTitle').value,
-        category: document.getElementById('reqCategory').value,
-        location: document.getElementById('reqLocation').value,
-        author: document.getElementById('reqAuthor').value,
-        description: document.getElementById('reqDescription').value,
-        status: 'Open'
-    };
+        const newReq = {
+            title: document.getElementById('reqTitle').value,
+            category: document.getElementById('reqCategory').value,
+            location: document.getElementById('reqLocation').value,
+            author: document.getElementById('reqAuthor').value,
+            description: document.getElementById('reqDescription').value,
+            status: 'Open'
+        };
 
-    requests.unshift(newReq);
-    saveRequests();
-    renderRequests();
+        try {
+            const response = await fetch(`${API_URL}/requests`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newReq)
+            });
+            
+            if (response.ok) {
+                const createdReq = await response.json();
+                requests.unshift(createdReq);
+            } else {
+                newReq.id = Date.now();
+                requests.unshift(newReq);
+            }
+        } catch (err) {
+            newReq.id = Date.now();
+            requests.unshift(newReq);
+        }
 
-    requestForm.reset();
-    document.getElementById('requestModal').classList.remove('active');
-});
+        localStorage.setItem('madad_requests', JSON.stringify(requests));
+        renderRequests();
+
+        requestForm.reset();
+        const modal = document.getElementById('requestModal');
+        if (modal) modal.classList.remove('active');
+    });
+}
 
 // --- Event Listeners for Filters ---
-searchInput.addEventListener('input', renderRequests);
-categoryFilter.addEventListener('change', renderRequests);
-statusFilter.addEventListener('change', renderRequests);
+if (searchInput) searchInput.addEventListener('input', renderRequests);
+if (categoryFilter) categoryFilter.addEventListener('change', renderRequests);
+if (statusFilter) statusFilter.addEventListener('change', renderRequests);
 
 // --- Security Helper ---
 function escapeHTML(str) {
+    if (!str) return '';
     return str.replace(/[&<>'"]/g, 
         tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
     );
 }
 
-// Initial Render on Page Load
-renderRequests();
+// Initial Fetch and Render on Page Load
+fetchRequests();
